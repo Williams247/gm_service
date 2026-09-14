@@ -1,0 +1,12 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.gitignore
+README.md
+LICENSE
+requirements.txt
+setup.py
+setup.cfg
+setup.py
