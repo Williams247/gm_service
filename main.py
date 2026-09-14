@@ -4,10 +4,10 @@ import os
 import secrets
 from typing import Any
 
+import resend
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
-from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
 from pydantic import BaseModel, EmailStr, field_validator
 
 MAX_MESSAGE_LENGTH = 300
@@ -15,41 +15,29 @@ MAX_MESSAGE_LENGTH = 300
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-app = FastAPI(title="Gmail Mailer API")
+app = FastAPI(title="Global Mailer API")
 
-REQUIRED_ENV_VARS = ("MAIL_USERNAME", "MAIL_PASSWORD", "MAIL_FROM")
+REQUIRED_ENV_VARS = ("RESEND_API_KEY", "MAIL_FROM")
 API_KEY_PREFIX = "MAILER_KEY_"
 
-def get_gmail_config() -> ConnectionConfig:
+
+def get_from_address() -> str:
+    mail_from = os.environ["MAIL_FROM"].strip()
+    from_name = os.getenv("MAIL_FROM_NAME", "Global Mailer").strip()
+    if "<" in mail_from and ">" in mail_from:
+        return mail_from
+    return f"{from_name} <{mail_from}>"
+
+
+def init_resend() -> str:
     missing = [name for name in REQUIRED_ENV_VARS if not os.getenv(name)]
     if missing:
         raise RuntimeError(
             f"Missing required environment variables: {', '.join(missing)}"
         )
 
-    mail_username = os.environ["MAIL_USERNAME"].strip()
-    mail_from = os.environ["MAIL_FROM"].strip()
-    mail_password = os.environ["MAIL_PASSWORD"].replace(" ", "").strip()
-
-    if mail_from.lower() != mail_username.lower():
-        logger.warning(
-            "MAIL_FROM (%s) differs from MAIL_USERNAME (%s); Gmail may reject or misdeliver",
-            mail_from,
-            mail_username,
-        )
-
-    return ConnectionConfig(
-        MAIL_USERNAME=mail_username,
-        MAIL_PASSWORD=mail_password,
-        MAIL_FROM=mail_from,
-        MAIL_FROM_NAME=os.getenv("MAIL_FROM_NAME", "Gmail Mailer"),
-        MAIL_PORT=int(os.getenv("MAIL_PORT", "587")),
-        MAIL_SERVER=os.getenv("MAIL_SERVER", "smtp.gmail.com"),
-        MAIL_STARTTLS=os.getenv("MAIL_STARTTLS", "true").lower() == "true",
-        MAIL_SSL_TLS=os.getenv("MAIL_SSL_TLS", "false").lower() == "true",
-        USE_CREDENTIALS=True,
-        VALIDATE_CERTS=True,
-    )
+    resend.api_key = os.environ["RESEND_API_KEY"].strip()
+    return get_from_address()
 
 
 def load_api_keys() -> dict[str, str]:
@@ -64,14 +52,15 @@ def load_api_keys() -> dict[str, str]:
         keys[service] = key
     return keys
 
+
 def get_service_for_api_key(provided_key: str, api_keys: dict[str, str]) -> str | None:
     for service, stored_key in api_keys.items():
         if secrets.compare_digest(provided_key, stored_key):
             return service
     return None
 
-conf = get_gmail_config()
-fast_mail = FastMail(conf)
+
+mail_from = init_resend()
 api_keys = load_api_keys()
 
 if not api_keys:
@@ -128,28 +117,32 @@ class EmailSchema(BaseModel):
         return text
 
 
-async def send_email_async(
+def send_email_task(
     email_to: str, subject: str, body: str, service: str
 ) -> None:
-    message = MessageSchema(
-        subject=subject,
-        recipients=[email_to],
-        body=body,
-        subtype=MessageType.html,
-    )
     try:
-        await fast_mail.send_message(message)
-        logger.info("[%s] Email accepted by Gmail for delivery to %s", service, email_to)
+        resend.Emails.send(
+            {
+                "from": mail_from,
+                "to": [email_to],
+                "subject": subject,
+                "html": body,
+            }
+        )
+        logger.info("[%s] Email accepted by Resend for delivery to %s", service, email_to)
     except Exception:
         logger.exception("[%s] Failed to send email to %s", service, email_to)
+
 
 @app.get("/health")
 async def health():
     return {
         "status": 200,
         "success": True,
-        "message": "I dey very galant boss"
+        "message": "I dey very galant boss",
+        "mail_provider": "resend",
     }
+
 
 @app.post("/send-email")
 async def send_email(
@@ -158,7 +151,7 @@ async def send_email(
     service: str = Depends(require_api_key),
 ):
     background_tasks.add_task(
-        send_email_async,
+        send_email_task,
         payload.email,
         payload.subject,
         payload.body,
