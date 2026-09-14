@@ -1,13 +1,16 @@
+import json
 import logging
 import os
-import re
 import secrets
+from typing import Any
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
 from pydantic import BaseModel, EmailStr, field_validator
+
+MAX_MESSAGE_LENGTH = 300
 
 load_dotenv()
 
@@ -87,7 +90,7 @@ async def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")) -> st
 class EmailSchema(BaseModel):
     email: EmailStr
     subject: str
-    body: str
+    body: Any
 
     @field_validator("email", mode="before")
     @classmethod
@@ -108,13 +111,21 @@ class EmailSchema(BaseModel):
 
     @field_validator("body", mode="before")
     @classmethod
-    def validate_message_digits(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        stripped = value.strip()
-        if not re.fullmatch(r"\d{4,8}", stripped):
-            raise ValueError("Message must contain only digits, between 4 and 8 characters")
-        return stripped
+    def validate_message(cls, value: object) -> str:
+        if value is None:
+            text = ""
+        elif isinstance(value, str):
+            text = value
+        elif isinstance(value, (dict, list)):
+            text = json.dumps(value, separators=(",", ":"))
+        else:
+            text = str(value)
+
+        if len(text) > MAX_MESSAGE_LENGTH:
+            raise ValueError(
+                f"Message must be at most {MAX_MESSAGE_LENGTH} characters"
+            )
+        return text
 
 
 async def send_email_async(
