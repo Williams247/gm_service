@@ -17,7 +17,6 @@ app = FastAPI(title="Gmail Mailer API")
 REQUIRED_ENV_VARS = ("MAIL_USERNAME", "MAIL_PASSWORD", "MAIL_FROM")
 API_KEY_PREFIX = "MAILER_KEY_"
 
-
 def get_gmail_config() -> ConnectionConfig:
     missing = [name for name in REQUIRED_ENV_VARS if not os.getenv(name)]
     if missing:
@@ -27,7 +26,6 @@ def get_gmail_config() -> ConnectionConfig:
 
     mail_username = os.environ["MAIL_USERNAME"].strip()
     mail_from = os.environ["MAIL_FROM"].strip()
-    # Gmail app passwords are often copied with spaces — strip them.
     mail_password = os.environ["MAIL_PASSWORD"].replace(" ", "").strip()
 
     if mail_from.lower() != mail_username.lower():
@@ -62,7 +60,6 @@ def load_api_keys() -> dict[str, str]:
         service = env_name.removeprefix(API_KEY_PREFIX).lower().replace("_", "-")
         keys[service] = key
     return keys
-
 
 def get_service_for_api_key(provided_key: str, api_keys: dict[str, str]) -> str | None:
     for service, stored_key in api_keys.items():
