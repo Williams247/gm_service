@@ -137,7 +137,7 @@ async def health():
     return {
         "status": 200,
         "success": True,
-        "message": "I dey active boss"
+        "message": "I dey very galant boss"
     }
 
 @app.post("/send-email")
